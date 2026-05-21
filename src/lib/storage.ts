@@ -36,6 +36,37 @@ export function saveSettings(settings: BYOKConfig): void {
   setItem(KEYS.SETTINGS, settings);
 }
 
+// === Storage pruning ===
+
+const PRUNE_LIMITS = { analyses: 50, chats: 50, reports: 50 } as const;
+const PRUNE_KEEP = { analyses: 40, chats: 40, reports: 20 } as const;
+
+export function pruneStorage(): void {
+  // Prune analyses
+  const analyses = getAnalyses();
+  if (analyses.length > PRUNE_LIMITS.analyses) {
+    setItem(KEYS.ANALYSES, analyses.slice(0, PRUNE_KEEP.analyses));
+  }
+
+  // Prune chats (stored as a Record keyed by analysisId)
+  const chats = getItem<Record<string, Chat>>(KEYS.CHATS, {});
+  const chatKeys = Object.keys(chats);
+  if (chatKeys.length > PRUNE_LIMITS.chats) {
+    const keysToKeep = chatKeys.slice(0, PRUNE_KEEP.chats);
+    const prunedChats: Record<string, Chat> = {};
+    for (const key of keysToKeep) {
+      prunedChats[key] = chats[key];
+    }
+    setItem(KEYS.CHATS, prunedChats);
+  }
+
+  // Prune reports
+  const reports = getReports();
+  if (reports.length > PRUNE_LIMITS.reports) {
+    setItem(KEYS.REPORTS, reports.slice(0, PRUNE_KEEP.reports));
+  }
+}
+
 // === Analyses ===
 
 export function getAnalyses(): Analysis[] {
@@ -46,6 +77,7 @@ export function saveAnalysis(analysis: Analysis): void {
   const analyses = getAnalyses().filter((a) => a.id !== analysis.id);
   analyses.unshift(analysis);
   setItem(KEYS.ANALYSES, analyses);
+  pruneStorage();
 }
 
 export function getAnalysis(id: string): Analysis | null {
@@ -68,6 +100,7 @@ export function saveChat(chat: Chat): void {
   const chats = getItem<Record<string, Chat>>(KEYS.CHATS, {});
   chats[chat.analysisId] = chat;
   setItem(KEYS.CHATS, chats);
+  pruneStorage();
 }
 
 // === Reports ===
@@ -80,6 +113,7 @@ export function saveReport(report: Report): void {
   const reports = getReports().filter((r) => r.id !== report.id);
   reports.unshift(report);
   setItem(KEYS.REPORTS, reports);
+  pruneStorage();
 }
 
 export function getReport(id: string): Report | null {

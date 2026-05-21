@@ -1,5 +1,12 @@
 export function generateId(): string {
-  return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2, 11);
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback: concatenate multiple Math.random() calls to produce >= 16 hex chars (~64 bits)
+  const hex = (Math.random() * 0xffffffff).toString(16).padStart(8, "0")
+    + (Math.random() * 0xffffffff).toString(16).padStart(8, "0")
+    + (Math.random() * 0xffffffff).toString(16).padStart(8, "0");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function formatDuration(seconds: number): string {
@@ -46,9 +53,12 @@ export function parseLoomUrl(url: string): string | null {
 }
 
 export function detectVideoSource(url: string): { type: "youtube" | "vimeo" | "loom" | "mp4"; id?: string } | null {
-  if (parseYouTubeUrl(url)) return { type: "youtube", id: parseYouTubeUrl(url)! };
-  if (parseVimeoUrl(url)) return { type: "vimeo", id: parseVimeoUrl(url)! };
-  if (parseLoomUrl(url)) return { type: "loom", id: parseLoomUrl(url)! };
+  const youtubeId = parseYouTubeUrl(url);
+  if (youtubeId) return { type: "youtube", id: youtubeId };
+  const vimeoId = parseVimeoUrl(url);
+  if (vimeoId) return { type: "vimeo", id: vimeoId };
+  const loomId = parseLoomUrl(url);
+  if (loomId) return { type: "loom", id: loomId };
   if (url.match(/\.(mp4|webm|ogg)(\?.*)?$/i)) return { type: "mp4" };
   if (url.match(/^https?:\/\//)) return { type: "mp4" }; // fallback: treat as direct video URL
   return null;

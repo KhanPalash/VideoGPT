@@ -99,6 +99,8 @@ export default function ReportViewer() {
               {formatTimestamp(latestReport.createdAt)}
             </span>
           </div>
+          {/* XSS risk: srcDoc renders raw HTML, but all interpolated values in
+              generateReportHTML are sanitized via escapeHtml() in providers.tsx */}
           <iframe
             srcDoc={latestReport.html}
             className="w-full h-[500px] bg-black"

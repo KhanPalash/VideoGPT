@@ -269,8 +269,24 @@ export class AIClient {
     messages: { role: "system" | "user" | "assistant"; content: string }[],
     options?: { temperature?: number; maxTokens?: number }
   ): AsyncGenerator<string> {
-    const base = this.config.baseUrl.replace(/\/+$/, "");
-    const endpoint = `${base}/chat/completions`;
+    if (this.config.provider === "Anthropic") {
+      yield* this.anthropicStreamChat(messages, options);
+      return;
+    }
+
+    if (this.config.provider === "Gemini") {
+      yield* this.geminiStreamChat(messages, options);
+      return;
+    }
+
+    yield* this.openaiStreamChat(messages, options);
+  }
+
+  private async *openaiStreamChat(
+    messages: { role: "system" | "user" | "assistant"; content: string }[],
+    options?: { temperature?: number; maxTokens?: number }
+  ): AsyncGenerator<string> {
+    const endpoint = this.getEndpoint();
 
     const body: Record<string, unknown> = {
       model: this.config.model,
@@ -348,6 +364,167 @@ export class AIClient {
             }
           }
 
+          if (content) yield content;
+        } catch {
+          // skip malformed lines
+        }
+      }
+    }
+  }
+
+  private async *anthropicStreamChat(
+    messages: { role: "system" | "user" | "assistant"; content: string }[],
+    options?: { temperature?: number; maxTokens?: number }
+  ): AsyncGenerator<string> {
+    const endpoint = this.getEndpoint();
+
+    const systemMsg = messages.find((m) => m.role === "system");
+    const chatMessages = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    const body: Record<string, unknown> = {
+      model: this.config.model,
+      max_tokens: options?.maxTokens ?? 4096,
+      messages: chatMessages,
+      stream: true,
+    };
+
+    if (systemMsg) {
+      body.system = systemMsg.content;
+    }
+    if (options?.temperature !== undefined) {
+      body.temperature = options.temperature;
+    }
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Anthropic streaming error (${response.status}): ${error}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // Anthropic SSE uses "event:" and "data:" lines
+        if (!trimmed.startsWith("data:")) continue;
+
+        let data: string;
+        if (trimmed.startsWith("data: ")) {
+          data = trimmed.slice(6).trim();
+        } else {
+          data = trimmed.slice(5).trim();
+        }
+
+        if (!data) continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          // content_block_delta events contain incremental text
+          if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta") {
+            const content = parsed.delta.text;
+            if (content) yield content;
+          }
+        } catch {
+          // skip malformed lines
+        }
+      }
+    }
+  }
+
+  private async *geminiStreamChat(
+    messages: { role: "system" | "user" | "assistant"; content: string }[],
+    options?: { temperature?: number; maxTokens?: number }
+  ): AsyncGenerator<string> {
+    const base = this.config.baseUrl.replace(/\/+$/, "");
+    const endpoint = `${base}/models/${this.config.model}:streamGenerateContent?alt=sse`;
+
+    const systemMsg = messages.find((m) => m.role === "system");
+    const chatMessages = messages.filter((m) => m.role !== "system");
+
+    const contents = chatMessages.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
+
+    const body: Record<string, unknown> = {
+      contents,
+      generationConfig: {
+        ...(options?.temperature !== undefined && { temperature: options.temperature }),
+        ...(options?.maxTokens !== undefined && { maxOutputTokens: options.maxTokens }),
+      },
+    };
+
+    if (systemMsg) {
+      body.systemInstruction = { parts: [{ text: systemMsg.content }] };
+    }
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": this.config.apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Gemini streaming error (${response.status}): ${error}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        let data: string;
+        if (trimmed.startsWith("data: ")) {
+          data = trimmed.slice(6).trim();
+        } else if (trimmed.startsWith("data:")) {
+          data = trimmed.slice(5).trim();
+        } else {
+          continue;
+        }
+
+        if (!data) continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
           if (content) yield content;
         } catch {
           // skip malformed lines

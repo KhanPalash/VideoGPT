@@ -6,6 +6,7 @@ import {
   useCallback,
   useState,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react";
 import type {
@@ -46,6 +47,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     isAnalyzing: false,
     analysisProgress: "",
   });
+
+  // Keep a ref to currentAnalysis so callbacks can always read the latest
+  // value without stale closures (avoids capturing stale state in useCallback).
+  const currentAnalysisRef = useRef(state.currentAnalysis);
+  useEffect(() => {
+    currentAnalysisRef.current = state.currentAnalysis;
+  }, [state.currentAnalysis]);
 
   // Load persisted data on mount
   useEffect(() => {
@@ -113,7 +121,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const sendChatMessage = useCallback(
     async (content: string) => {
       const settings = getSettings();
-      const analysis = state.currentAnalysis;
+      const analysis = currentAnalysisRef.current;
       if (!settings || !analysis) return;
 
       const chat = getChat(analysis.id) ?? {
@@ -309,7 +317,7 @@ You have FULL context of this video. Answer the user's questions based on this v
         }));
       }
     },
-    [state.currentAnalysis]
+    []
   );
 
   const generateReport = useCallback(async (): Promise<Report | null> => {
@@ -399,6 +407,15 @@ export function useApp(): AppContextType {
   return context;
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
 function generateReportHTML(analysis: Analysis): string {
   const pointsHtml = analysis.main_points
     .map(
@@ -408,10 +425,10 @@ function generateReportHTML(analysis: Analysis): string {
         <span class="text-2xl flex-shrink-0 mt-0.5">💡</span>
         <div class="flex-1">
           <div class="flex items-center gap-3 mb-2">
-            <h3 class="font-semibold text-lg">${p.title}</h3>
-            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300">${p.importance}</span>
+            <h3 class="font-semibold text-lg">${escapeHtml(p.title)}</h3>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300">${escapeHtml(p.importance)}</span>
           </div>
-          <p class="text-gray-400 leading-relaxed">${p.description}</p>
+          <p class="text-gray-400 leading-relaxed">${escapeHtml(p.description)}</p>
         </div>
       </div>
     </div>`
@@ -423,11 +440,11 @@ function generateReportHTML(analysis: Analysis): string {
       (idea, i) => `
     <div class="insight-card glass rounded-xl p-5 border border-white/5" style="animation-delay: ${0.3 + i * 0.05}s">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300">${idea.category}</span>
+        <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300">${escapeHtml(idea.category)}</span>
       </div>
-      <h4 class="font-semibold text-white text-sm mb-1">${idea.title}</h4>
-      <p class="text-gray-400 text-sm">${idea.description}</p>
-      ${idea.practical_implication ? `<p class="text-gray-500 text-xs mt-2">💡 ${idea.practical_implication}</p>` : ""}
+      <h4 class="font-semibold text-white text-sm mb-1">${escapeHtml(idea.title)}</h4>
+      <p class="text-gray-400 text-sm">${escapeHtml(idea.description)}</p>
+      ${idea.practical_implication ? `<p class="text-gray-500 text-xs mt-2">💡 ${escapeHtml(idea.practical_implication)}</p>` : ""}
     </div>`
     )
     .join("\n");
@@ -436,14 +453,14 @@ function generateReportHTML(analysis: Analysis): string {
     .map(
       (im, i) => `
     <div class="glass rounded-xl p-5 border-l-4" style="border-left-color: #10b981; animation-delay: ${0.4 + i * 0.05}s">
-      <h4 class="font-semibold text-white text-sm mb-2">${im.title}</h4>
-      <p class="text-gray-400 text-sm mb-3">${im.description}</p>
+      <h4 class="font-semibold text-white text-sm mb-2">${escapeHtml(im.title)}</h4>
+      <p class="text-gray-400 text-sm mb-3">${escapeHtml(im.description)}</p>
       ${im.implementation_steps.length > 0 ? `
       <ol class="space-y-1.5">
         ${im.implementation_steps.map((step, si) => `
           <li class="flex items-start gap-2 text-gray-500 text-xs">
             <span class="w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 text-xs font-bold flex-shrink-0">${si + 1}</span>
-            ${step}
+            ${escapeHtml(step)}
           </li>`).join("\n")}
       </ol>` : ""}
     </div>`
@@ -454,8 +471,8 @@ function generateReportHTML(analysis: Analysis): string {
     .map(
       (b, i) => `
     <div class="glass rounded-xl p-4 border-l-4" style="border-left-color: #f59e0b; animation-delay: ${0.5 + i * 0.05}s">
-      <h4 class="font-semibold text-white text-sm mb-1">${b.title}</h4>
-      <p class="text-gray-400 text-xs">${b.description}</p>
+      <h4 class="font-semibold text-white text-sm mb-1">${escapeHtml(b.title)}</h4>
+      <p class="text-gray-400 text-xs">${escapeHtml(b.description)}</p>
     </div>`
     )
     .join("\n");
@@ -464,8 +481,8 @@ function generateReportHTML(analysis: Analysis): string {
     .map(
       (e, i) => `
     <div class="glass rounded-xl p-4 border-l-4" style="border-left-color: #06b6d4; animation-delay: ${0.6 + i * 0.05}s">
-      <h4 class="font-semibold text-white text-sm mb-1">${e.title}</h4>
-      <p class="text-gray-400 text-xs">${e.description}</p>
+      <h4 class="font-semibold text-white text-sm mb-1">${escapeHtml(e.title)}</h4>
+      <p class="text-gray-400 text-xs">${escapeHtml(e.description)}</p>
     </div>`
     )
     .join("\n");
@@ -474,8 +491,8 @@ function generateReportHTML(analysis: Analysis): string {
     .map(
       (w, i) => `
     <div class="glass rounded-xl p-4 border border-red-500/20" style="animation-delay: ${0.7 + i * 0.05}s">
-      <p class="text-red-400 text-xs font-medium mb-1">⚠ ${w.claim}</p>
-      <p class="text-gray-500 text-xs">${w.reason}</p>
+      <p class="text-red-400 text-xs font-medium mb-1">⚠ ${escapeHtml(w.claim)}</p>
+      <p class="text-gray-500 text-xs">${escapeHtml(w.reason)}</p>
     </div>`
     )
     .join("\n");
@@ -484,8 +501,8 @@ function generateReportHTML(analysis: Analysis): string {
     .map(
       (q, i) => `
     <div class="glass rounded-xl p-5 border-l-4" style="border-left-color: #f472b6; animation-delay: ${0.8 + i * 0.05}s">
-      <p class="text-gray-200 text-sm italic leading-relaxed mb-2">"${q.quote}"</p>
-      <p class="text-gray-500 text-xs">— ${q.meaning}</p>
+      <p class="text-gray-200 text-sm italic leading-relaxed mb-2">"${escapeHtml(q.quote)}"</p>
+      <p class="text-gray-500 text-xs">— ${escapeHtml(q.meaning)}</p>
     </div>`
     )
     .join("\n");
@@ -499,8 +516,8 @@ function generateReportHTML(analysis: Analysis): string {
         ${i < analysis.timeline_breakdown.length - 1 ? '<div class="w-0.5 flex-1 bg-gradient-to-b from-blue-500/30 to-purple-500/30 mt-1"></div>' : ""}
       </div>
       <div class="flex-1">
-        <span class="text-xs font-mono text-gray-500">${t.timestamp}</span>
-        <p class="text-gray-300 text-sm">${t.topic}</p>
+        <span class="text-xs font-mono text-gray-500">${escapeHtml(t.timestamp)}</span>
+        <p class="text-gray-300 text-sm">${escapeHtml(t.topic)}</p>
       </div>
     </div>`
     )
@@ -511,7 +528,7 @@ function generateReportHTML(analysis: Analysis): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${analysis.videoSource.title ?? "Video Analysis"} - VideoGPT Report</title>
+  <title>${escapeHtml(analysis.videoSource.title ?? "Video Analysis")} - VideoGPT Report</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
@@ -541,12 +558,12 @@ function generateReportHTML(analysis: Analysis): string {
         <span class="text-sm text-gray-400">AI-Powered Video Intelligence</span>
       </div>
       <h1 class="text-4xl md:text-6xl font-bold gradient-text mb-4">
-        ${analysis.videoSource.title ?? "Video Analysis"}
+        ${escapeHtml(analysis.videoSource.title ?? "Video Analysis")}
       </h1>
       <div class="flex flex-wrap justify-center gap-3 text-sm text-gray-500">
-        <span>${analysis.video_metadata.overall_theme ? `🎯 ${analysis.video_metadata.overall_theme}` : ""}</span>
-        <span>${analysis.video_metadata.audience_type ? `👥 ${analysis.video_metadata.audience_type}` : ""}</span>
-        <span>${analysis.video_metadata.tone ? `🎭 ${analysis.video_metadata.tone}` : ""}</span>
+        <span>${analysis.video_metadata.overall_theme ? `🎯 ${escapeHtml(analysis.video_metadata.overall_theme)}` : ""}</span>
+        <span>${analysis.video_metadata.audience_type ? `👥 ${escapeHtml(analysis.video_metadata.audience_type)}` : ""}</span>
+        <span>${analysis.video_metadata.tone ? `🎭 ${escapeHtml(analysis.video_metadata.tone)}` : ""}</span>
       </div>
       <p class="text-gray-400 text-sm mt-4">
         Generated by VideoGPT &middot; ${new Date(analysis.createdAt).toLocaleDateString()} &middot; ${analysis.transcript.segments.length} transcript segments
@@ -561,7 +578,7 @@ function generateReportHTML(analysis: Analysis): string {
         Executive Summary
       </h2>
       <div class="prose prose-invert max-w-none text-gray-300 leading-relaxed whitespace-pre-line">
-        ${analysis.executive_summary}
+        ${escapeHtml(analysis.executive_summary)}
       </div>
     </div>` : ""}
 
@@ -652,7 +669,7 @@ function generateReportHTML(analysis: Analysis): string {
         <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-lg">🏁</span>
         Final Takeaway
       </h2>
-      <p class="text-gray-200 text-lg leading-relaxed font-medium">${analysis.final_takeaway}</p>
+      <p class="text-gray-200 text-lg leading-relaxed font-medium">${escapeHtml(analysis.final_takeaway)}</p>
     </div>` : ""}
 
     <!-- Footer -->
